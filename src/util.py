@@ -371,10 +371,6 @@ def export_model_structure(c, path):
                 f.write(",")
             f.write("\n")
 
-    """with open(f"{path_new}/best_model.txt", "w") as f:
-        f.write(f"ep: {c.components['best_model'].epoch} \n")
-        f.write(f"error_val_min: {c.components['best_model'].error_val_min} \n")"""
-
 def get_size_of_dict(dict_size):
     size = 0
     for value in dict_size.values():

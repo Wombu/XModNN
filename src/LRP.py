@@ -97,7 +97,7 @@ class LRP:
 
         self.normalise_importances(initial_R=initial_R, lrp_type=lrp_type)
 
-        importances = self.collect_importances(pred=pred, initial_R=initial_R)
+        importances = self.collect_importances(pred=pred)
         self.controler.reset_tensor()
 
         #self.controler.reset_tensor()
@@ -110,15 +110,8 @@ class LRP:
             tensor_indize[:, l][v_indize == l] = 1
         return tensor_indize
 
-    #TODO: überarbeiten, Normalisierung ist nicht mehr notwendig, weil Residuals zurückgerechnet werden
     def normalise_importances(self, initial_R, lrp_type):
         ini_R = torch.sum(initial_R, dim=1).unsqueeze(1)
-        """module_depth = {}
-        for key_module, key_depth in self.controler.module_order:
-            if key_depth not in module_depth:
-                module_depth[key_depth] = [key_module]
-            else:
-                module_depth[key_depth].append(key_module)"""
 
         # Debug: Kontrolle, ob Summen in den layern gleich sind
         """sum_R_key_depth = {}
@@ -129,24 +122,13 @@ class LRP:
                 for n_key in self.controler.module[key_module]["hidden_layer"][0]:
                     sum_R_key_depth[key_depth] += self.node_lrp[n_key].R_j.squeeze(1)"""
 
-
         for neuron in self.node_lrp.values():
             if neuron.R_j is not None:
-                #neuron.R_residual[neuron.R_residual < 0] = 0
+                t_tmp = neuron.R_j / ini_R
+                neuron.R_j_norm = copy.copy(t_tmp)
+                neuron.R_residual = neuron.R_residual / ini_R
 
-                #t_tmp = neuron.R_j - neuron.R_residual
-                t_tmp = neuron.R_j
-
-                if lrp_type == "sglrp":
-                    t_tmp[t_tmp < 0] = 0
-                    neuron.R_j_norm = copy.copy(t_tmp)
-                else:
-                    t_tmp = t_tmp / ini_R
-                    neuron.R_j_norm = copy.copy(t_tmp)
-
-                    neuron.R_residual = neuron.R_residual / ini_R
-
-    def collect_importances(self, pred, initial_R):
+    def collect_importances(self, pred):
         tensor_pred = self.tensor_indize_max_pred(pred=pred)
         # certainty thresholds berechnen und mit tensor_pred verbinden
         certainty_level = {}
@@ -161,14 +143,11 @@ class LRP:
             certainty_level[c] = tensor_certainty
             certainty_pred_level[c] = tensor_pred_certainty
 
-
         # Sammlung von allen betrachteten Nodes
         key_imp = []
         for module in self.controler.module.values():
             key_imp += module["hidden_layer"][0]
         key_imp += self.controler.features
-
-        #test = self.controler.module[self.controler.output]["output"]
 
         # Berechnen der Werte
         importances = {}
@@ -181,33 +160,15 @@ class LRP:
             importances[f"{key_nodes}_residual"] = []
 
             for c, tensor_certainty in certainty_level.items():
-                importances[key_nodes].append(torch.sum(torch.abs(imp_tmp[tensor_certainty])))
-                importances[f"{key_nodes}_residual"].append(torch.sum(torch.abs(imp_res_tmp[tensor_certainty])))
-
-            for c, tensor_certainty in certainty_level.items():
                 importances[key_nodes].append(torch.sum(imp_tmp[tensor_certainty]))
                 importances[f"{key_nodes}_residual"].append(torch.sum(imp_res_tmp[tensor_certainty]))
-
-            """for c, tensor_pred_certainty in certainty_pred_level.items():
-                for l, label in enumerate(self.controler.label_list):
-                    importances[key_nodes].append(torch.sum(torch.abs(imp_tmp[tensor_pred_certainty[:, l]])))"""
 
             for c, tensor_pred_certainty in certainty_pred_level.items():
                 for l, label in enumerate(self.controler.label_list):
                     importances[key_nodes].append(torch.sum(imp_tmp[tensor_pred_certainty[:, l]]))
                     importances[f"{key_nodes}_residual"].append(torch.sum(imp_res_tmp[tensor_pred_certainty[:, l]]))
 
-        columnames = [f"{c}_sum_abs" for c in certainty_level.keys()]
-        columnames += [f"{c}_sum" for c in certainty_level.keys()]
-        #columnames += [f"{c}_sum" for c in certainty_level.keys()]
-
-        """for c in certainty_pred_level.keys():
-            for label in self.controler.label_list:
-                columnames.append(f"{c}_sumabs_{label}")"""
-
-        for c in certainty_pred_level.keys():
-            for label in self.controler.label_list:
-                columnames.append(f"{c}_sum_{label}")
+        columnames = [f"{c}_sum" for c in certainty_level.keys()]
 
         return importances, columnames
 
