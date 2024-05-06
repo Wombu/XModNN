@@ -12,73 +12,82 @@ def warn(*args, **kwargs):
 import warnings
 warnings.warn = warn
 
+# output path
 path = "output/logic"
-
 util.create_directory(directory_new=path)
 path_models = f"{path}/models"
 util.create_directory(directory_new=path_models)
-
-notes = "note for this model"
-
-num_model = 10
-
-# Alle Parameter
-#device = "cuda:1"
-device = "cpu"
-
-args_controler = {"epochs": 10,
-                  "batch_size": 64,
-                  "validation_size": 0.2,
-                  "test_size": 0.2,
-                  "disable_bias": False,
-                  "disable_first_layer_bias": True,
-                  "disable_last_layer_bias": False,
-                  "disable_output_weights_bias": True,
-                  "device": torch.device(device if torch.cuda.is_available() else 'cpu')
-                  }
-
-
-args_optimiser = {"lr": 0.01}
-
-args_penalty = {"method": "L1",  # L1, L2, L2_neuron
-                "all_weights": True,
-                "multiplikator_all_weights": 0.01,
-                "last_layer_weights": False,
-                "multiplikator_last_layer_weights": 0.01,
-                "first_layer_weights": True,
-                "multiplikator_first_layer_weights": 0.1}
-
-args_weight_init = {"method": "normal_Xavier",  # "He", "normal_dist", "Xavier", "normal_Xavier"
-                    "mean": 0.0,
-                    "std": 0.5}
-
-args_loss = {"loss": "CrossEntropyLoss",  # MSELoss, BCELoss
-             "disable_weights": True,
-             "weights": [3, 1]}
-
-args_dataPreprocessing = {"mean_reduction": True,
-                          "balanced_dataset": True}
-
-args_best_model = {"path": path}
-
-args_local_grad = {"path": path}
-
-args_metrics = {"metrics": ["acc", "f1", "sens", "spec", "mcc"]}
-
-args_multiloss = {"threshold_epoch": [2, 4, 6, 6],
-                  "multiloss_weights": {3: 1.3, 2: 1.2, 1: 1.1, 0: 1}}
-args_model = {"act": "tanh",  # "tanh", "sigmoid", "relu"
-              "hidden": [3, 3, 3]}
 
 source_structure = "data/logic/structure.csv"
 source_data = "data/logic/dataset.csv"
 source_label = "data/logic/label.csv"
 
+notes = "notes for this model"
+
+# Alle Parameter
+#device = "cuda:1"
+device = "cpu"
+
+# Crossvalidation
+num_model = 10
+
+#General parameter for the model
+args_controler = {"epochs": 10,
+                  "batch_size": 64,
+                  "validation_size": 0.2,
+                  "test_size": 0.2,
+                  "disable_bias": False,  # all biases
+                  "disable_first_layer_bias": True,  # module specific bias
+                  "disable_last_layer_bias": False,  # module specific bias
+                  "disable_output_weights_bias": True,  # module specific bias
+                  "device": torch.device(device if torch.cuda.is_available() else 'cpu')
+                  }
+
+# learning rate
+args_optimiser = {"lr": 0.01}
+
+# parameter for the penalty methods
+args_penalty = {"method": "L1",  # penalty methods, possibilities: L1, L2, L2_neuron
+                "all_weights": True,  # penalty for all weights
+                "multiplikator_all_weights": 0.01,
+                "last_layer_weights": False,  # module specific penalty
+                "multiplikator_last_layer_weights": 0.01,
+                "first_layer_weights": True,  # module specific penalty
+                "multiplikator_first_layer_weights": 0.1}
+
+# parameter for weight initiation
+args_weight_init = {"method": "normal_Xavier",  #initialization, pissibilities: "He", "normal_dist", "Xavier", "normal_Xavier"
+                    "mean": 0.0,
+                    "std": 0.5}
+
+# parameter for loss functions
+args_loss = {"loss": "CrossEntropyLoss",  # loss functions, possibilities: MSELoss, BCELoss
+             "disable_weights": True,  # label balancing
+             "weights": [3, 1]}
+
+# preprocessing
+args_dataPreprocessing = {"mean_reduction": True,
+                          "balanced_dataset": True}
+
+# weighted multi-loss progressive training
+args_multiloss = {"threshold_epoch": [2, 4, 6, 6],  # progressive learning
+                  "multiloss_weights": {3: 1.3, 2: 1.2, 1: 1.1, 0: 1}}  # weighted layer
+
+# module definition
+args_model = {"act": "tanh",  # activation functions, possibilities: "tanh", "sigmoid", "relu"
+              "hidden": [3, 3, 3]}  # module size
+
+args_best_model = {"path": path}
+
+args_local_grad = {"path": path}
+
+# calculated metrics
+args_metrics = {"metrics": ["acc", "f1", "sens", "spec", "mcc"]}
 
 # Speichern der Parameter, Notizen und Quellorte
 sources = {"structure": source_structure, "data": source_data, "label": source_label}
 
-util.notes_to_file(path=path, notes=notes, dicts=[sources, args_dataPreprocessing,  args_controler, args_optimiser, args_penalty, args_weight_init, args_loss, args_multiloss, args_model]) #args_early_stopping
+util.notes_to_file(path=path, notes=notes, dicts=[sources, args_dataPreprocessing,  args_controler, args_optimiser, args_penalty, args_weight_init, args_loss, args_multiloss, args_model])
 
 # Kopieren des Datensatzes, Label und Strukturdatei (Bei zu großen Datensätzen weglassen)
 copyfile(source_structure, path + "/structure.txt")
@@ -91,7 +100,7 @@ features, neurons, output = util.import_structure(filename=source_structure)
 data, data_colnames = util.import_data(filename=source_data)
 label, label_colnames = util.import_data(filename=source_label)
 
-if(args_dataPreprocessing["mean_reduction"]): #! TODO: export values
+if(args_dataPreprocessing["mean_reduction"]):
     for key, item in data.items():
         data[key] = util.mean_reduction(values=item)
 
@@ -220,4 +229,3 @@ for i in range(num_model):
     #util.plot_importance(importance=importance_nodes, filename=f"{path}/LRP/epsilon_val")
     util.file_importance(importance=importances, columnames=columnames, module_order=c.module_order, modules=c.module, features=c.features, path=f"{path_model_iter}/LRP/epsilon_val")
     print("Epsilon Val LRP done")
-
