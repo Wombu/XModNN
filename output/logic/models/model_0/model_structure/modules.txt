@@ -1,4 +1,0 @@
-logic1,1,logic1_2_0,logic1_2_1,logic1_2_2,logic1_1_0,logic1_1_1,logic1_1_2,logic1_0_0,logic1_0_1,logic1_0_2,
-logic2,1,logic2_2_0,logic2_2_1,logic2_2_2,logic2_1_0,logic2_1_1,logic2_1_2,logic2_0_0,logic2_0_1,logic2_0_2,
-logic_rnd,1,logic_rnd_2_0,logic_rnd_2_1,logic_rnd_2_2,logic_rnd_1_0,logic_rnd_1_1,logic_rnd_1_2,logic_rnd_0_0,logic_rnd_0_1,logic_rnd_0_2,
-output_module,0,output_module_2_0,output_module_2_1,output_module_2_2,output_module_1_0,output_module_1_1,output_module_1_2,output_module_0_0,output_module_0_1,output_module_0_2,

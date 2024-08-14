@@ -1,0 +1,8 @@
+A,logic1,logic1_name	B,f1,f1_name	E,f1,ilmn_id	
+A,logic1,logic1_name	B,f2,f2_name	E,f2,ilmn_id	
+A,logic1,logic1_name	B,f5_rnd,f5_rnd_name	E,f5_rnd,ilmn_id	
+A,logic2,logic2_name	B,f3,f3_name	E,f3,ilmn_id	
+A,logic2,logic2_name	B,f4,f4_name	E,f4,ilmn_id	
+A,logic2,logic2_name	B,f6_rnd,f6_rnd_name	E,f6_rnd,ilmn_id	
+A,logic_rnd,logic_rnd_name	B,f7_rnd,f7_rnd_name	E,f7_rnd,ilmn_id	
+A,logic_rnd,logic_rnd_name	B,f8_rnd,f8_rnd_name	E,f8_rnd,ilmn_id	

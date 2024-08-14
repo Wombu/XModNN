@@ -25,23 +25,21 @@ source_label = "data/logic/label.csv"
 notes = "notes for this model"
 
 # Alle Parameter
-#device = "cuda:1"
-device = "cpu"
-
-# Crossvalidation
-num_model = 10
 
 #General parameter for the model
-args_controler = {"epochs": 10,
-                  "batch_size": 64,
-                  "validation_size": 0.2,
-                  "test_size": 0.2,
+args_controler = {"epochs": 12,
+                  "batch_size": 8,
                   "disable_bias": False,  # all biases
                   "disable_first_layer_bias": True,  # module specific bias
                   "disable_last_layer_bias": False,  # module specific bias
                   "disable_output_weights_bias": True,  # module specific bias
-                  "device": torch.device(device if torch.cuda.is_available() else 'cpu')
                   }
+
+# Crossvalidation
+args_cake_cv = {"split": 10,  # The number of parts the dataset is divided into.
+                "size_cv": 10,  # How many iterations of cross-validation (CV) are performed, typically >= splits
+                "size_val": 2,  # How many parts are used for validation
+                "size_test": 1}  # How many parts are used for testing
 
 # learning rate
 args_optimiser = {"lr": 0.01}
@@ -63,11 +61,10 @@ args_weight_init = {"method": "normal_Xavier",  #initialization, pissibilities: 
 # parameter for loss functions
 args_loss = {"loss": "CrossEntropyLoss",  # loss functions, possibilities: MSELoss, BCELoss
              "disable_weights": True,  # label balancing
-             "weights": [3, 1]}
+             "weights": "automatic"} # automatic or as list for example: [1, 7]
 
 # preprocessing
-args_dataPreprocessing = {"mean_reduction": True,
-                          "balanced_dataset": True}
+args_dataPreprocessing = {"mean_reduction": True}
 
 # weighted multi-loss progressive training
 args_multiloss = {"threshold_epoch": [2, 4, 6, 6],  # progressive learning
@@ -77,41 +74,38 @@ args_multiloss = {"threshold_epoch": [2, 4, 6, 6],  # progressive learning
 args_model = {"act": "tanh",  # activation functions, possibilities: "tanh", "sigmoid", "relu"
               "hidden": [3, 3, 3]}  # module size
 
+# calculated metrics
+args_metrics = {"metrics": ["acc", "f1", "sens", "spec", "mcc"]}
+
 args_best_model = {"path": path}
 
 args_local_grad = {"path": path}
 
-# calculated metrics
-args_metrics = {"metrics": ["acc", "f1", "sens", "spec", "mcc"]}
 
 # Speichern der Parameter, Notizen und Quellorte
 sources = {"structure": source_structure, "data": source_data, "label": source_label}
 
-util.notes_to_file(path=path, notes=notes, dicts=[sources, args_dataPreprocessing,  args_controler, args_optimiser, args_penalty, args_weight_init, args_loss, args_multiloss, args_model])
+util.notes_to_file(path=path, notes=notes, dicts=[sources, args_controler, args_cake_cv, args_optimiser, args_penalty, args_weight_init, args_loss, args_dataPreprocessing, args_multiloss, args_model])
 
-# Kopieren des Datensatzes, Label und Strukturdatei (Bei zu großen Datensätzen weglassen)
-copyfile(source_structure, path + "/structure.txt")
+# Copying the dataset, label, and structure file (omit if the dataset is too large)
+copyfile(source_structure, path + "/structure.csv")
 util.create_directory(directory_new=f"{path}/data")
-copyfile(source_data, f"{path}/data/dataset.txt")
-copyfile(source_label, f"{path}/data/label.txt")
+copyfile(source_data, f"{path}/data/dataset.csv")
+copyfile(source_label, f"{path}/data/label.csv")
 
 
 features, neurons, output = util.import_structure(filename=source_structure)
-data, data_colnames = util.import_data(filename=source_data)
-label, label_colnames = util.import_data(filename=source_label)
+data = util.import_data(filename=source_data)
+label = util.import_data(filename=source_label)
+label_unique_sorted = sorted(list(set(label.iloc[0].tolist())))
 
-if(args_dataPreprocessing["mean_reduction"]):
-    for key, item in data.items():
-        data[key] = util.mean_reduction(values=item)
-
-dataset = Dataset.Dataset(x=data, y=label)
-if(args_dataPreprocessing["balanced_dataset"]):
-    dataset.balance()
+data_split = util.data_split_index(data=data, label=label, split=args_cake_cv["split"], size_cv=args_cake_cv["size_cv"], size_val=args_cake_cv["size_val"], size_test=args_cake_cv["size_test"])
+util.export_split(path=f"{path}/data", split=data_split)
 
 # Create XMondNN Controler
 c = Controller.Controller(args_controler=args_controler, args_multiloss=args_multiloss, args_model=args_model)
 c.set_args(args=args_controler)
-c.build_model_modules(modules=neurons, features=features, labels=dataset.label_list, output=output, args_weight_init=args_weight_init)
+c.build_model_modules(modules=neurons, features=features, labels=label_unique_sorted, output=output, args_weight_init=args_weight_init)
 c.local_graph(modules=neurons)
 
 # Init Components
@@ -127,30 +121,24 @@ c.set_component(component=component_multiloss)
 component_metric = component_metrics.Metrics(args=args_metrics)
 c.set_component(component=component_metric)
 
-for i in range(num_model):
+for i in range(len(data_split)):
     path_model_iter = f"{path_models}/model_{i}"
     util.create_directory(directory_new=path_model_iter)
     util.create_directory(directory_new=f"{path_model_iter}/values")
-    util.create_directory(directory_new=f"{path_model_iter}/module_eval")
 
     c.components["best_model"].reset_for_iter(path=path_model_iter)
+
+    c.datasets_init(data=data, label=label, data_split=data_split[i], mean_reduction=args_dataPreprocessing["mean_reduction"])
 
     c.init_weights(args_weight_init=args_weight_init)
     c.disable_bias_func()
     c.set_optimiser(lr=args_optimiser["lr"])
     c.set_loss(args=args_loss)
 
-    c.datasets_init(dataset=copy.deepcopy(dataset))
-
     time1 = time.time()
     result = c.train_multiloss()  # return: running_loss, running_acc, running_f1, running_sens, running_spec, y_pred_softmax, y_true}
     time2 = time.time()
     print(f"Zeit fürs gesamte Training: {time2 - time1}")
-
-    # Export model structure
-    util.export_model_structure(c=c, path=path_model_iter)
-    # Error as Plot
-    #util.export_module_error(module_error=c.error_module, module_error_ep=c.error_module_ep, path=f"{path_model_iter}/module_eval")
 
     result_keys = ["acc", "f1", "loss", "sens", "spec", "mcc"]
     #for key, item in result.items():
@@ -197,35 +185,38 @@ for i in range(num_model):
 
         util.create_confusion_matrix_plt(array=confusion_matrix, target_names=c.label_list, path=f"{path_model_iter}/confusion_matrix_{key_dataset}")
 
-    # ROC-Curve
-    util.export_pred(y_true=result["y_true"], y_pred=result["y_pred"], path=f"{path_model_iter}/values")
-
     # Eval und Plot von LRP
     util.create_directory(directory_new=f"{path_model_iter}/LRP")
 
     #  Epsilon
-    if(args_controler["test_size"] != 0):
-        lrp = LRP.LRP(controler=c)
-        args_lrp = {"epsilon": 0.1, }
-        lrp.set_args(args=args_lrp)
+    lrp = LRP.LRP(controler=c)
+    args_lrp = {"epsilon": 0.1, }
+    lrp.set_args(args=args_lrp)
 
-        importancesb, columnames = lrp.eval_dataset(dataset="test", type="epsilon", lrp_type="lrp")
-        #util.plot_importance(importance=importance_modules, module_order=c.module_order, filename=f"{path}/LRP/epsilon_test")
-        util.file_importance(importance=importancesb, columnames=columnames, module_order=c.module_order, modules=c.module, features=c.features, path=f"{path_model_iter}/LRP/epsilon_test")
-        print("Epsilon Test LRP done")
+    (importances, columnames), (df_importances, df_predictions) = lrp.eval_dataset(dataset="test", type="epsilon", lrp_type="lrp")
+    # df_importances = df_importances.set_index(list(importances_dict.keys()))
+    # util.plot_importance(importance=importance_modules, module_order=c.module_order, filename=f"{path}/LRP/epsilon_test")
+    util.file_importance(importance=importances, columnames=columnames, module_order=c.module_order, modules=c.module, features=c.features, path=f"{path_model_iter}/LRP/epsilon_test_values")
+    df_importances.to_csv(f"{path_model_iter}/LRP/epsilon_test_values/importance_dataset_test.csv")
+    df_predictions.to_csv(f"{path_model_iter}/LRP/epsilon_test_values/predictions_dataset_test.csv")
+    print("Epsilon Test LRP done")
 
     lrp = LRP.LRP(controler=c)
     args_lrp = {"epsilon": 0.1, }
     lrp.set_args(args=args_lrp)
-    importances, columnames = lrp.eval_dataset(dataset="train", type="epsilon", lrp_type="lrp")
-    #util.plot_importance(importance=importance_nodes, filename=f"{path}/LRP/epsilon_train")
-    util.file_importance(importance=importances, columnames=columnames, module_order=c.module_order, modules=c.module, features=c.features, path=f"{path_model_iter}/LRP/epsilon_train")
+    (importances, columnames), (df_importances, df_predictions) = lrp.eval_dataset(dataset="train", type="epsilon", lrp_type="lrp")
+    # util.plot_importance(importance=importance_nodes, filename=f"{path}/LRP/epsilon_train")
+    util.file_importance(importance=importances, columnames=columnames, module_order=c.module_order, modules=c.module, features=c.features, path=f"{path_model_iter}/LRP/epsilon_train_values")
+    df_importances.to_csv(f"{path_model_iter}/LRP/epsilon_train_values/importance_dataset_train.csv")
+    df_predictions.to_csv(f"{path_model_iter}/LRP/epsilon_train_values/predictions_dataset_train.csv")
     print("Epsilon Train LRP done")
 
     lrp = LRP.LRP(controler=c)
     args_lrp = {"epsilon": 0.1, }
     lrp.set_args(args=args_lrp)
-    importances, columnames = lrp.eval_dataset(dataset="validation", type="epsilon", lrp_type="lrp")
-    #util.plot_importance(importance=importance_nodes, filename=f"{path}/LRP/epsilon_val")
-    util.file_importance(importance=importances, columnames=columnames, module_order=c.module_order, modules=c.module, features=c.features, path=f"{path_model_iter}/LRP/epsilon_val")
+    (importances, columnames), (df_importances, df_predictions) = lrp.eval_dataset(dataset="validation", type="epsilon", lrp_type="lrp")
+    # util.plot_importance(importance=importance_nodes, filename=f"{path}/LRP/epsilon_val")
+    util.file_importance(importance=importances, columnames=columnames, module_order=c.module_order, modules=c.module, features=c.features, path=f"{path_model_iter}/LRP/epsilon_val_values")
+    df_importances.to_csv(f"{path_model_iter}/LRP/epsilon_val_values/importance_dataset_validation.csv")
+    df_predictions.to_csv(f"{path_model_iter}/LRP/epsilon_val_values/predictions_dataset_validation.csv")
     print("Epsilon Val LRP done")

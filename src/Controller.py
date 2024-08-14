@@ -1,6 +1,6 @@
 from src.Model import Neuron
 from src import general_eval as g_eval
-from src import util
+from src import util, Dataset
 
 """from Model import Neuron
 import general_eval as g_eval
@@ -19,7 +19,7 @@ import time
 
 from sys import getsizeof
 
-class Controller(): #TODO: Variablen überprüfen, sind bestimmt nicht mehr alle notwendig
+class Controller():
     def __init__(self, args_controler, args_multiloss, args_model):
         self.args_controler = args_controler
         """Dict of arguments for Controller"""
@@ -58,16 +58,36 @@ class Controller(): #TODO: Variablen überprüfen, sind bestimmt nicht mehr alle
         else:
             print("Component " + component.name_component + " not implemented")
 
-    def datasets_init(self, dataset, data_test=None):
-        if data_test != None:
-            self.dataset_validation, _ = dataset.split_set(split=self.validation_size)
-            self.dataset_train = dataset
-            self.dataset_test = data_test
-            return
-        # Train, Val, Test-Dataset
-        self.dataset_validation, _ = dataset.split_set(split=self.validation_size)
-        self.dataset_test, _ = dataset.split_set(split=self.test_size)
-        self.dataset_train = dataset
+    def datasets_init(self, data, label, data_split, mean_reduction): #TODO: schöner programmieren
+        if mean_reduction:
+            data_tmp = data.iloc[:, data_split[0]]
+            mean = data_tmp.mean(axis=0)
+            data_tmp = data_tmp - mean
+            mean = mean.mean()
+            label_tmp = label.iloc[:, data_split[0]]
+            self.dataset_train = Dataset.Dataset(x=copy.copy(data_tmp), y=label_tmp)
+
+            data_tmp = data.iloc[:, data_split[1]]
+            data_tmp = data_tmp - mean.mean()
+            label_tmp = label.iloc[:, data_split[1]]
+            self.dataset_validation = Dataset.Dataset(x=copy.copy(data_tmp), y=label_tmp)
+
+            data_tmp = data.iloc[:, data_split[2]]
+            label_tmp = label.iloc[:, data_split[2]]
+            data_tmp = data_tmp - mean
+            self.dataset_test = Dataset.Dataset(x=copy.copy(data_tmp), y=label_tmp)
+        else:
+            data_tmp = data.iloc[:, data_split[0]]
+            label_tmp = label.iloc[:, data_split[0]]
+            self.dataset_train = Dataset.Dataset(x=data_tmp, y=label_tmp)
+
+            data_tmp = data.iloc[:, data_split[1]]
+            label_tmp = label.iloc[:, data_split[1]]
+            self.dataset_validation = Dataset.Dataset(x=data_tmp, y=label_tmp)
+
+            data_tmp = data.iloc[:, data_split[2]]
+            label_tmp = label.iloc[:, data_split[2]]
+            self.dataset_test = Dataset.Dataset(x=data_tmp, y=label_tmp)
 
     # Erstelle für jeden Pathway ein Modul, welches aus min einer Schicht mit so vielen Neuronen wie es label gibt, besteht
     def build_model_modules(self, modules, features, labels, output, args_weight_init):
@@ -76,11 +96,11 @@ class Controller(): #TODO: Variablen überprüfen, sind bestimmt nicht mehr alle
         self.features = features
         self.model = {}
 
-        #! TODO: kompakter: function init_module, create_neurons,
-        #! TODO: Modul als vollständiges Netz behandeln? Mit seq etz...
-        #for module_name, module_act, module_input in modules:
+        # ! TODO: kompakter: function init_module, create_neurons,
+        # ! TODO: Modul als vollständiges Netz behandeln? Mit seq etz...
+        # for module_name, module_act, module_input in modules:
         for module_name, module_input in modules:
-            self.module[module_name] = {"output": [], "input": [], "depth": None, "hidden": self.args_model["hidden"], "neurons": []} #! TODO: Module als Klasse?  #! TODO:hidden variable machen, vllt in Abhängigkeit von Größe des Inputs[3, 3]
+            self.module[module_name] = {"output": [], "input": [], "depth": None, "hidden": self.args_model["hidden"], "neurons": []}  # ! TODO: Module als Klasse?  #! TODO:hidden variable machen, vllt in Abhängigkeit von Größe des Inputs[3, 3]
             self.module[module_name]["hidden_layer"] = {i: [] for i in range(len(self.module[module_name]["hidden"]))}
             # Erstellung der hidden Layer für jedes Modul
             for layer_pos, layer_size in reversed(list(enumerate(self.module[module_name]["hidden"]))):
@@ -91,19 +111,25 @@ class Controller(): #TODO: Variablen überprüfen, sind bestimmt nicht mehr alle
                         if module_input_name in self.features:  # Wenn Input Feature, nur String übernehmen
                             input_tmp.append(module_input_name)
                         else:  # Wenn der Input von einem anderen Modul kommt, erstelle Strings zu den konkreten Neuronen von letztem Layer des Input modules
-                            size_last_layer_input = self.module[module_input_name]['hidden'][0]#[-1]
+                            size_last_layer_input = self.module[module_input_name]['hidden'][0]  # [-1]
                             input_tmp = input_tmp + [f"{module_input_name}_0_{n_list_comp}" for n_list_comp in range(size_last_layer_input)]
                     self.module[module_name]["input"] = module_input
                 else:  # Input innerhalb eines Moduls, dann erstelle Strings von Neuronen im vorherigen Layer
-                    input_tmp = [f"{module_name}_{layer_pos+1}_{n_list_comp}" for n_list_comp in range(self.module[module_name]["hidden"][layer_pos+1])]
+                    input_tmp = [f"{module_name}_{layer_pos + 1}_{n_list_comp}" for n_list_comp in range(self.module[module_name]["hidden"][layer_pos + 1])]
 
                 # Nach der Erstellung des Inputs, werden jetzt die konkreten Neuronen erstellt, initiiert und in das self.model - dict und das self.module[key] - dict eingefügt
+                # TODO: Wahrscheinlich besser als eigene Schleife.
                 for n_tmp in range(layer_size):
                     neuron_name_tmp = f"{module_name}_{layer_pos}_{n_tmp}"
-                    neuron_tmp = Neuron(name=neuron_name_tmp) #! TODO: in Konstruktor packen?
-                    neuron_tmp.init_act(args_model=self.args_model)
+                    neuron_tmp = Neuron(name=neuron_name_tmp)  # ! TODO: in Konstruktor packen?
+                    if layer_pos == 0:  # TODO: temporär, um letzten Layer mit id als act auszustatten!
+                        args_tmp = copy.copy(self.args_model)
+                        args_tmp["act"] = "id"
+                        neuron_tmp.init_act(args_model=args_tmp)
+                    else:
+                        neuron_tmp.init_act(args_model=self.args_model)
                     neuron_tmp.input_keys = copy.copy(input_tmp)
-                    #neuron_tmp.init_weights(args=args_weight_init)
+                    # neuron_tmp.init_weights(args=args_weight_init)
 
                     self.model[neuron_name_tmp] = neuron_tmp
                     self.module[module_name]["neurons"].append(neuron_tmp)
@@ -115,28 +141,27 @@ class Controller(): #TODO: Variablen überprüfen, sind bestimmt nicht mehr alle
                 neuron_name_tmp = f"{module_name}_{l}"
                 neuron_tmp = Neuron(name=neuron_name_tmp)
                 args_tmp = copy.copy(self.args_model)
-                args_tmp["act"] = "sigmoid" #TODO: notwendig, wenn loss, das beinhaltet oder lieber identität!
-                #neuron_tmp.init_act(args_model=args_tmp)#TODO: tmp für LRP Auswertung
-                neuron_tmp.init_act(args_model=self.args_model)
+                # args_tmp["act"] = "sigmoid"
+                args_tmp["act"] = "id"  # TODO: Trainingsmodus implementieren!
+                # args_tmp["act"] = "relu"
+                neuron_tmp.init_act(args_model=args_tmp)
+                # neuron_tmp.init_act(args_model=self.args_model)
                 neuron_tmp.input_keys = copy.copy(input_tmp)
+                neuron_tmp.is_output = True
 
                 self.model[neuron_name_tmp] = neuron_tmp
-                self.module[module_name]["output"].append(neuron_tmp) #! TODO geht bestimmt kompakter
+                self.module[module_name]["output"].append(neuron_tmp)  # ! TODO geht bestimmt kompakter
 
         # Input des models mit Neuronen (Klasse füllen), also Strings mit den konkreten Neuronen ersetzen
         # output_keys mit Namen fülleb
         for neuron in self.model.values():
             for input_key in neuron.input_keys:
-                if input_key in self.features: #! TODO: Features haben kein output_keys, könnte hilfreich sein.
+                if input_key in self.features:  # ! TODO: Features haben kein output_keys, könnte hilfreich sein.
                     neuron.input.append(input_key)
                 else:
                     neuron.input.append(self.model[input_key])
                     self.model[input_key].output_keys.append(neuron.name)
 
-        """# Ausgalagert, wegen normalized Xavier, braucht input_keys
-        for neuron in self.model.values():
-            neuron.init_weights(args=args_weight_init)
-        """
         # Dokumentation von Fehler der einzelnen Module
         for module_name in self.module.keys():
             self.error_module[module_name] = []
@@ -144,7 +169,7 @@ class Controller(): #TODO: Variablen überprüfen, sind bestimmt nicht mehr alle
         # Tiefe der Module berechnen
         self.cal_depth_module(key_output=output)
 
-        #self.local_graph()
+        # self.local_graph()
         self.module_ordering()
 
     def init_weights(self, args_weight_init):
@@ -180,7 +205,6 @@ class Controller(): #TODO: Variablen überprüfen, sind bestimmt nicht mehr alle
         for module_key in self.module.keys():
             self.cal_depth_neuron(module=self.module[module_key])
 
-    # TODO: unnötige Funktion?!
     def cal_depth_neuron(self, module):
         for layer_depth, neurons in module["hidden_layer"].items():
             for neuron in neurons:
@@ -233,7 +257,10 @@ class Controller(): #TODO: Variablen überprüfen, sind bestimmt nicht mehr alle
             module_name = self.output
 
         # Predict hole Dataset
-        x_train, y_train = dataset.tensor_output()
+        #x_train, y_train = dataset.tensor_output()
+        x_train, y_train = dataset[0:len(dataset)]
+        x_train = {key: item.unsqueeze(1) for key, item in x_train.items()}
+        y_train = {key: item.unsqueeze(1) for key, item in y_train.items()}
         self.x_batch = x_train
 
         y_pred = self.prediction_module(x=x_train, module_name=module_name)
@@ -252,10 +279,6 @@ class Controller(): #TODO: Variablen überprüfen, sind bestimmt nicht mehr alle
         else:
             metrics = None
 
-        # !TODO Achtung doppelte Softmax drin!
-        """softmax = torch.nn.Softmax(dim=1) 
-        y_pred_softmax = softmax(y_pred)"""
-        #return float(self.loss.detach().numpy()), acc, f1_score, sensitivity, specificity, mcc, y_pred_softmax, y_true
         return float(self.loss.detach().numpy()), y_pred, y_true, metrics
 
     # Predict hole Dataset, modulewise

@@ -1,18 +1,17 @@
-note for this model
+notes for this model
 structure: data/logic/structure.csv
 data: data/logic/dataset.csv
 label: data/logic/label.csv
-mean_reduction: True
-balanced_dataset: True
-epochs: 10
-batch_size: 64
-validation_size: 0.2
-test_size: 0.2
+epochs: 12
+batch_size: 8
 disable_bias: False
 disable_first_layer_bias: True
 disable_last_layer_bias: False
 disable_output_weights_bias: True
-device: cpu
+split: 10
+size_cv: 10
+size_val: 2
+size_test: 1
 lr: 0.01
 method: L1
 all_weights: True
@@ -26,7 +25,8 @@ mean: 0.0
 std: 0.5
 loss: CrossEntropyLoss
 disable_weights: True
-weights: [3, 1]
+weights: automatic
+mean_reduction: True
 threshold_epoch: [2, 4, 6, 6]
 multiloss_weights: {3: 1.3, 2: 1.2, 1: 1.1, 0: 1}
 act: tanh

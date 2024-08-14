@@ -2,11 +2,11 @@ import copy
 import numpy as np
 import torch
 import time
-#import pandas as pd
+import pandas as pd
 
 class NeuronLRP:
     #def __init__(self, name, weights=None, input_keys=[], bias=0,  activation=None, is_feature=False, depth=None):
-    def __init__(self, name, neuron, is_feature):
+    def __init__(self, name, is_feature, neuron=None):
         self.name = name
 
         self.R_j = None
@@ -14,14 +14,18 @@ class NeuronLRP:
         self.z_j = None
         self.inc_importance_Rij = {}
 
-        self.diasable_bias = neuron.disable_bias
-
         if is_feature:
             self.is_feature = True  # is feature unnötig, einfach länge von input keys überprüfen, sieht aber schöner aus.
             self.input_keys = []
+            self.is_output = False
+            self.depth = "feature" #TODO: Notlösung, um nicht alles zu ändern
         else:
+
             self.is_feature = False
             self.input_keys = copy.copy(neuron.input_keys)
+
+            self.diasable_bias = neuron.disable_bias
+            self.is_output = neuron.is_output
 
             #self.weights = list(neuron.weights.detach().numpy())
             #self.weights = neuron.weights.detach()
@@ -48,14 +52,27 @@ class NeuronLRP:
 
 class LRP:
     def __init__(self, controler):
-        self.controler = controler  # Wahrscheinlich nicht notwendig
+        self.controler = controler
         self.datasets = self.import_datsets(controler)
         self.node_lrp = self.convert_neurons_to_neuronLRP(controler)
+        self.depth_module_keys, self.depth_feature_keys = self.depth_module(controler)
 
         self.lrp_type = {"epsilon": self.lrp_epsilon,
                          "gamma": self.lrp_gamma,
                          "ab": self.lrp_ab,
                          "basic": self.lrp_basic}
+
+    def depth_module(self, controler):
+        depth_module_keys = {}
+        for key_module, key_depth in controler.module_order:
+            if key_depth not in depth_module_keys:
+                depth_module_keys[key_depth] = [key_module]
+            else:
+                depth_module_keys[key_depth].append(key_module)
+
+        depth_feature_keys = controler.features
+
+        return depth_module_keys, depth_feature_keys
 
     def import_datsets(self, controler): #unnötig, ist in Controler
         dataset_dict = {}
@@ -72,6 +89,9 @@ class LRP:
         node_LRP = {}
 
         for key, neuron in self.controler.model.items():
+            """if neuron.is_output:
+                continue"""
+
             node_LRP[key] = NeuronLRP(name=key, neuron=neuron, is_feature=False)
 
         for key in feature_set:
@@ -95,13 +115,15 @@ class LRP:
         if lrp_type == "sglrp":
             initial_R = self.controler_sglrp(type=type, pred=pred)
 
-        self.normalise_importances(initial_R=initial_R, lrp_type=lrp_type)
+        self.normalise_importances(initial_R=initial_R, lrp_type=lrp_type)  # TODO: mit neuer normalisierung mit dem Betrag aller Relevanzen, ist initial_R nicht notwendig.
 
-        importances = self.collect_importances(pred=pred)
+        importances_collected = self.collect_importances(pred=pred, initial_R=initial_R)
+        df_importances = self.importances_dataset(name_dataset=dataset)
+        df_predictions = self.predictions_dataset(name_dataset=dataset, pred=pred)
         self.controler.reset_tensor()
 
-        #self.controler.reset_tensor()
-        return importances
+        # self.controler.reset_tensor()
+        return importances_collected, (df_importances, df_predictions)
 
     def tensor_indize_max_pred(self, pred):
         v_max, v_indize = torch.max(pred, dim=1)
@@ -113,22 +135,63 @@ class LRP:
     def normalise_importances(self, initial_R, lrp_type):
         ini_R = torch.sum(initial_R, dim=1).unsqueeze(1)
 
-        # Debug: Kontrolle, ob Summen in den layern gleich sind
-        """sum_R_key_depth = {}
-        for key_depth, key_modules in module_depth.items():
+        # finde Betrag aller Relevancen aller Layer und summiere sie auf, um einen generelle Aktivität zu bekommen != zu ini_R
+        sum_R_key_depth = {}
+        for key_depth, key_modules in self.depth_module_keys.items():
             if key_depth not in sum_R_key_depth:
                 sum_R_key_depth[key_depth] = torch.zeros(size=ini_R.size())
             for key_module in key_modules:
                 for n_key in self.controler.module[key_module]["hidden_layer"][0]:
-                    sum_R_key_depth[key_depth] += self.node_lrp[n_key].R_j.squeeze(1)"""
+                    sum_R_key_depth[key_depth] += self.node_lrp[n_key].R_j.abs() #self.node_lrp[n_key].R_j#.squeeze(1)
+
+        sum_R_key_depth["feature"] = torch.zeros(size=ini_R.size())
+        for key_feature in self.depth_feature_keys:
+            R_j_abs = self.node_lrp[key_feature].R_j.abs()
+            sum_R_key_depth["feature"] += R_j_abs
+
+        # nan
+        for key in sum_R_key_depth.keys():
+            sum_R_key_depth[key] = torch.nan_to_num(sum_R_key_depth[key])
 
         for neuron in self.node_lrp.values():
-            if neuron.R_j is not None:
-                t_tmp = neuron.R_j / ini_R
-                neuron.R_j_norm = copy.copy(t_tmp)
-                neuron.R_residual = neuron.R_residual / ini_R
+            #if neuron.R_j is not None and not neuron.is_output:
+            if not neuron.is_feature and not neuron.is_output: #TODO: vielleicht einfacher mit if -> divisor ändern
+                neuron.R_j_norm = copy.copy(neuron.R_j / sum_R_key_depth[neuron.depth[0]])
+                neuron.R_residual = neuron.R_residual / sum_R_key_depth[neuron.depth[0]]
 
-    def collect_importances(self, pred):
+            if neuron.is_feature:
+                neuron.R_j_norm = copy.copy(neuron.R_j / sum_R_key_depth["feature"])
+                neuron.R_residual = neuron.R_residual / sum_R_key_depth["feature"]
+
+    def importances_dataset(self, name_dataset):  # name_dataset temporär, Info sollte global verfügbar sein oder nur ein datatset in class LRP eingelesen werden
+        importances = {}
+        for key_depth, key_modules in self.depth_module_keys.items():
+            for key_module in key_modules:
+                importance_module_tmp = None
+                for n_key in self.controler.module[key_module]["hidden_layer"][0]:
+                    if importance_module_tmp == None:
+                        importance_module_tmp = copy.copy(self.node_lrp[n_key].R_j_norm)
+                    else:
+                        importance_module_tmp += copy.copy(self.node_lrp[n_key].R_j_norm)
+                importances[key_module] = importance_module_tmp.squeeze(1).numpy()
+                #importances[key_module] = np.insert(importances[key_module], 0, key_depth)
+
+        for key_module in self.depth_feature_keys:
+            importances[key_module] = self.node_lrp[key_module].R_j_norm.squeeze(1).numpy()
+
+        df_importances = pd.DataFrame.from_dict(importances, orient="index", columns=self.datasets[name_dataset].x.columns)
+
+        return df_importances
+
+    def predictions_dataset(self, name_dataset, pred):
+        df_pred = pred.detach().numpy()
+        df_pred = pd.DataFrame(df_pred)
+        df_pred = df_pred.T
+        df_pred.columns = self.datasets[name_dataset].y.columns
+        df_pred.index = self.datasets[name_dataset].label_list
+        return df_pred
+
+    def collect_importances(self, pred, initial_R):
         tensor_pred = self.tensor_indize_max_pred(pred=pred)
         # certainty thresholds berechnen und mit tensor_pred verbinden
         certainty_level = {}
@@ -142,6 +205,7 @@ class LRP:
             tensor_pred_certainty = tensor_pred_certainty.type(torch.bool)
             certainty_level[c] = tensor_certainty
             certainty_pred_level[c] = tensor_pred_certainty
+
 
         # Sammlung von allen betrachteten Nodes
         key_imp = []
@@ -160,6 +224,10 @@ class LRP:
             importances[f"{key_nodes}_residual"] = []
 
             for c, tensor_certainty in certainty_level.items():
+                importances[key_nodes].append(torch.sum(torch.abs(imp_tmp[tensor_certainty])))
+                importances[f"{key_nodes}_residual"].append(torch.sum(torch.abs(imp_res_tmp[tensor_certainty])))
+
+            for c, tensor_certainty in certainty_level.items():
                 importances[key_nodes].append(torch.sum(imp_tmp[tensor_certainty]))
                 importances[f"{key_nodes}_residual"].append(torch.sum(imp_res_tmp[tensor_certainty]))
 
@@ -168,11 +236,16 @@ class LRP:
                     importances[key_nodes].append(torch.sum(imp_tmp[tensor_pred_certainty[:, l]]))
                     importances[f"{key_nodes}_residual"].append(torch.sum(imp_res_tmp[tensor_pred_certainty[:, l]]))
 
-        columnames = [f"{c}_sum" for c in certainty_level.keys()]
+        columnames = [f"{c}_sum_abs" for c in certainty_level.keys()]
+        columnames += [f"{c}_sum" for c in certainty_level.keys()]
+
+        for c in certainty_pred_level.keys():
+            for label in self.controler.label_list:
+                columnames.append(f"{c}_sum_{label}")
 
         return importances, columnames
 
-    def certainty_level(self): #TODO: Geht bestimmt eleganter :D
+    def certainty_level(self):
         certainty_min = round(float(1/len(self.controler.label_list)), 1)
         certainty_level = []
         while certainty_min < 1:
@@ -376,7 +449,7 @@ class LRP:
     def lrp_epsilon(self, node):
         z_ij = torch.multiply(node.input_tensor, node.weights_bias)
         z_j = torch.sum(z_ij, dim=1)
-        z_j = z_j.unsqueeze(-1) #TODO: squeeze nötig?
+        z_j = z_j.unsqueeze(-1)
 
         z_j_sign = torch.sign(z_j)
         epsilon = torch.multiply(z_j_sign, 0.1)
@@ -389,28 +462,9 @@ class LRP:
 
         return R_ij[:, 0:-1], R_residual.squeeze(1)
 
-    # TODO: zu tun ;D
-    def lrp_ab(self, z_ij, R_j): #! TODO: wie die anderen definieren, dann noch gamma implementieren
-        # ab
-        """z_ij_pos = torch.sign(z_ij)
-        z_ij_pos[z_ij_pos == -1] = 0
-        z_j_pos = torch.sum(torch.multiply(z_ij, z_ij_pos), dim=1)
+    def lrp_ab(self, z_ij, R_j): #! TODO: wie epsilon in neue Funktion überführen.
+        None
 
-        z_ij_neg = torch.sign(z_ij)
-        z_ij_neg[z_ij_neg == 1] = 0
-        z_j_neg = torch.sum(torch.multiply(z_ij, z_ij_neg), dim=1)"""
-
-        z_ij_pos = torch.sign(z_ij)
-        z_ij_pos[z_ij_pos == -1] = 0
-        z_j_pos = torch.sum(torch.multiply(z_ij, z_ij_pos), dim=1)
-        z_j_pos = z_j_pos.unsqueeze(-1)
-
-        z_ij_neg = torch.sign(z_ij)
-        z_ij_neg[z_ij_neg == 1] = 0
-        z_j_neg = torch.sum(torch.multiply(z_ij, z_ij_neg), dim=1)
-        z_j_neg = z_j_neg.unsqueeze(-1)
-
-    #TODO: zu tun ;D
     def lrp_gamma(self, node):
         None
 

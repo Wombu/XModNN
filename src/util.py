@@ -5,6 +5,9 @@ import seaborn as sn
 import numpy as np
 from operator import itemgetter
 import pandas as pd
+import copy
+import random
+import math
 
 import torch
 from src import LRP
@@ -49,27 +52,8 @@ def import_structure(filename):
     return features, neurons, output#, modules
 
 def import_data(filename):
-    input_tmp = []
-    with open(filename) as inputfile:
-        for i, line in enumerate(inputfile):
-            input_tmp.append(line)
-
-    data = {}
-    colnames = input_tmp[0].split(",")
-    for line in input_tmp[1:]:
-        line = line.rstrip()
-        line = line.split(",")
-        module_name = line[0]
-        values = line[1:]
-
-        data[module_name] = []
-        for item in values:
-            try: #TODO: In Dataset auslagern?
-                data[module_name].append(float(item))
-            except ValueError:
-                data[module_name].append(item)
-
-    return data, colnames
+    data = pd.read_csv(filename, index_col=0)
+    return data
 
 def create_directory(directory_new):
     current_path = os.getcwd()
@@ -151,6 +135,80 @@ def mean_reduction(values):
         new_values.append(float(item - mean_v))
     return new_values
 
+# Fill the division of the splits (currently just as an index) with the indices from the actual dataset.
+def fill_idx_with_sampleid(idx, split_idx):
+    filled_set = np.array([])
+    for idx_tmp in idx:
+        filled_set = np.append(filled_set, split_idx[idx_tmp])
+    #split_data[i][k] = filled_set
+    return filled_set
+
+def create_cake_splits(split, label_unique_sorted, label_where_dict):
+    # Create #split splits that maintain the ratio of labels from the original dataset.
+    split_idx = []  # "It will contain the indices of the samples that were split."
+    for i_split in range(split):  # "Iterate as many times as cv."
+        for label_iter in label_unique_sorted:  # "Iterate through all labels."
+            label_ratio_dict = {label_iter: math.floor(len(label_where_dict[label_iter]) / (split-i_split)) for label_iter in label_unique_sorted}  # "Calculate how often each label occurs in the iteration of cv. Recalculate each time to account for rounding."
+
+            for key, item in label_ratio_dict.items():
+                if item == 0:
+                    raise Exception(f"Not enough samples from label {key}. Lower split amount required.")
+
+        split_idx_tmp = []
+        for label_iter, i in label_ratio_dict.items():
+            index_label = np.random.choice(a=label_where_dict[label_iter], size=i, replace=False)  # select random sample per label with distinct ratio
+            index_del = np.where(label_where_dict[label_iter] == np.expand_dims(index_label, axis=1))[1]  # find indizes for sample # [1], darum: https://stackoverflow.com/questions/50646102/what-is-the-purpose-of-numpy-where-returning-a-tuple
+            label_where_dict[label_iter] = np.delete(label_where_dict[label_iter], index_del)  # del values with their indizes from orginial sample pool
+
+            split_idx_tmp = np.append(split_idx_tmp, index_label)
+
+        split_idx.append(split_idx_tmp)
+    return split_idx
+
+def randomise_index(split, size_split, size_val, size_test):
+    rnd_idx = list(range(split))
+    random.shuffle(rnd_idx)
+
+    rnd_idx_new = []
+    for i in range(math.ceil((size_split + size_val + size_test) / split)):
+        rnd_idx_new = rnd_idx_new + copy.copy(rnd_idx)
+
+    return rnd_idx_new
+
+# "label: contains the labels; split: the number of parts the dataset will be divided into; size_cv: the size of the cross-validation; size_val, size_test: the sizes of the validation and test datasets."
+def data_split_index(data, label, split=10, size_cv=20, size_val=2, size_test=1):
+    label_array = np.array(label.iloc[0].tolist())
+    label_unique_sorted = sorted(list(set(label_array)))  # find all labes
+    label_where_dict = {label: np.where(label_array == label)[0] for label in label_unique_sorted}  # "Find the index of all labels."
+
+    # "Create random datasets from the splits (at this point, just the indices) with the sizes size_test, size_val, and train (rest), ensuring that they do not overlap and that all splits are used equally."
+    split_data = []
+    for i in range(size_cv):
+        if i % (split - 1) == 0:
+            split_idx = create_cake_splits(split=split, label_unique_sorted=label_unique_sorted, label_where_dict=copy.copy(label_where_dict))
+            rnd_idx = randomise_index(split=split, size_split=size_cv, size_val=size_val, size_test=size_test)  # reshuffle
+        idx_test = copy.copy(rnd_idx[i: (size_test + i)])
+        idx_val = copy.copy(rnd_idx[size_test + i: size_test + size_val + i])
+        idx_train = copy.copy(rnd_idx[size_test + size_val + i: i + split])
+
+        idx_train = fill_idx_with_sampleid(idx=idx_train, split_idx=split_idx)
+        idx_val = fill_idx_with_sampleid(idx=idx_val, split_idx=split_idx)
+        idx_test = fill_idx_with_sampleid(idx=idx_test, split_idx=split_idx)
+        split_data.append([idx_train, idx_val, idx_test])
+
+    return split_data
+
+def export_split(path, split):
+    dataset_names = ["train", "val", "test"]
+    with open(f"{path}/cv_split.csv", "w") as f:
+        for c, cv_iter in enumerate(split):
+            for d, values in enumerate(cv_iter):
+                f.write(f"{c},{dataset_names[d]},")
+                for v in values[:-1]:
+                    f.write(f"{v},")
+                f.write(f"{values[-1]}")
+                f.write("\n")
+
 def evaluate_MNN(result, path, c):
     # Error as Plot
     result_keys = ["acc", "f1", "loss", "sens", "spec"]
@@ -221,40 +279,6 @@ def evaluate_MNN(result, path, c):
     file_importance(importance=importance_nodes, filename=path + "/" + "epsilon_val_values")
     print("Epsilon Val LRP done")
 
-    """if (args_controler["test_size"] != 0):
-        lrp = LRP.LRP(controler=c)
-        args_lrp = {"epsilon": 0.1, }
-        lrp.set_args(args=args_lrp)
-        importance_nodes, _ = lrp.eval_dataset(dataset="test", type="lrp_epsilon")
-        util.plot_importance(importance=importance_nodes, filename=path + "/" + "epsilon_test")
-        util.file_importance(importance=importance_nodes, filename=path + "/" + "epsilon_test_values")
-        print("Epsilon Test LRP done")"""
-
-    """# Gamma
-    lrp = LRP.LRP(controler=c)
-    args_lrp = {"gamma": 2, }
-    lrp.set_args(args=args_lrp)
-    importance_nodes, _ = lrp.eval_dataset(dataset="train", type="lrp_gamma")
-    plot_importance(importance=importance_nodes, filename=path + "/" + "gamma_train")
-    file_importance(importance=importance_nodes, filename=path + "/" + "gamma_train_values")
-    print("Epsilon Train LRP done")
-
-    lrp = LRP.LRP(controler=c)
-    args_lrp = {"gamma": 2, }
-    lrp.set_args(args=args_lrp)
-    importance_nodes, _ = lrp.eval_dataset(dataset="validation", type="lrp_gamma")
-    plot_importance(importance=importance_nodes, filename=path + "/" + "gamma_val")
-    file_importance(importance=importance_nodes, filename=path + "/" + "gamma_val_values")
-    print("Epsilon Val LRP done")"""
-
-    """if (args_controler["test_size"] != 0):
-        lrp = LRP.LRP(controler=c)
-        args_lrp = {"gamma": 2, }
-        lrp.set_args(args=args_lrp)
-        importance_nodes, _ = lrp.eval_dataset(dataset="test", type="lrp_gamma")
-        util.plot_importance(importance=importance_nodes, filename=path + "/" + "gamma_test")
-        util.file_importance(importance=importance_nodes, filename=path + "/" + "gamma_test_values")
-        print("Epsilon Test LRP done")"""
 
 def export_saved_grad(grad):
     None #TODO: hier export vorbereiten
@@ -490,17 +514,6 @@ def create_ROC(y_true, y_pred, label, path): # https://stackoverflow.com/questio
     #plt.show()
     plt.savefig(f"{path}.png")
     plt.close()
-
-def export_pred(y_true, y_pred, path): #TODO: Wenn Export von konkreten Datensätzen fertig auch Indize von vorhergesamtem Datenpunkt exportieren.
-    for dataset_tmp in ["train", "val", "test"]:
-        y_true_tmp = y_true[dataset_tmp].detach().numpy()
-        y_pred_tmp = y_pred[dataset_tmp].detach().numpy()
-        with open(f"{path}/predictions_{dataset_tmp}.txt", "w") as f:
-            for i in range(len(y_true_tmp)):
-                f.write(str(y_true_tmp[i]))
-                f.write(",")
-                f.write(str(y_pred_tmp[i]))
-                f.write("\n")
 
 def import_pw_names(path):
     delim = ","

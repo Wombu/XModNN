@@ -49,42 +49,39 @@ def import_data(filename):
 
     return data, colnames
 
-def cal_depth_module(modules, key_output, features):
-    queue = [key_output]
-    modules_depth = {key_output: 0}
+def module_depth(modules, key_output):
+    depth = {}
+    queue = [[key_output, 0]]
     while len(queue) != 0:
-        q_pop = queue.pop(0)
+        q_tmp = queue.pop()
 
-        for module_input in modules[q_pop]:
-            if module_input in features:
-                continue
-            if module_input not in modules_depth:
-                modules_depth[module_input] = modules_depth[q_pop] + 1
-            else:
-                if modules_depth[module_input] > modules_depth[q_pop] + 1:  # kürzere depth nehmen, um kürzeste Tiefe bei Schleife zu nehmen, kommt im Moment nicht vor
-                    modules_depth[module_input] = modules_depth[q_pop] + 1
+        if q_tmp[1] not in depth:
+            depth[q_tmp[1]] = []
+        depth[q_tmp[1]].append(q_tmp[0])
 
-            queue.append(module_input)
+        if q_tmp[0] not in modules:
+            continue
 
-    depth_max = max(list(modules_depth.values()))
-    for f in features:
-        modules_depth[f] = depth_max + 1
+        for input in modules[q_tmp[0]]:
+            queue.append([input, q_tmp[1]+1])
 
-    return modules_depth
+    for key, item in depth.items():
+        depth[key] = list(set(depth[key]))
+
+    return depth
 
 def import_pw_names(path):
     delim = ","
     names = {}
     with open(file=path) as f:
         for row in f:
-            row = row.rstrip().rsplit("\t")
-            for e in range(3):
-                name = row[e].split(delim)
-                names[name[1]] = name[2]
-
-            name_ilmn = row[-1].split(delim)[1]
-            name_kegg = row[-2].split(delim)[2]
-            names[name_ilmn] = name_kegg
+            row = row.rsplit("\t")
+            row = [r.split(delim) for r in row]
+            for e in range(len(row)-1):
+                if "ILMN" in row[e][1]:
+                    names[row[e][1]] = f"{row[3][2]}"
+                else:
+                    names[row[e][1]] = row[e][2]
     return names
 
 def import_ilmn_hsa(path):

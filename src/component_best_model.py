@@ -27,7 +27,7 @@ class Best_model():
         self.best_model_save(ep)
 
     def best_model_save(self, ep):
-        if ep < (self.c.args_multiloss["threshold_epoch"][-1] - 1):  #TODO: try: wenn multiloss nicht da ist? passiert wahrscheinlich nie oder ist 0
+        if ep < (self.c.args_multiloss["threshold_epoch"][-1] - 1):
             return
 
         if(self.c.running_loss["val"][-1] < self.error_val_min):

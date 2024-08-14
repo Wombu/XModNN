@@ -16,9 +16,10 @@ class Neuron(torch.nn.Module):
         self.input_tensor = None
         self.output_tensor = None
 
-        self.depth = [float("inf"), float("inf")]  # hilfreich, um output mit 0 zu markieren?
+        self.depth = [float("inf"), float("inf")]  # [depth_global(module), depth_local(hidden layer in module)], für LRP Normierung
         #self.depth = None  # hilfreich, um output mit 0 zu markieren?
         self.output_pos = None
+        self.is_output = False
 
         self.disable_bias = False
 
@@ -30,24 +31,10 @@ class Neuron(torch.nn.Module):
 
         self.act_dict = {"tanh": self.tanh,
                          "sigmoid": self. sigmoid,
-                         "relu": self.relu}
+                         "relu": self.relu,
+                         "id": self.identity}
 
         self.c = None
-
-    """def prep_input_memory(self, X):  # vllt optimieren, ohne python Liste
-        input_tensor = []
-        for item in self.input:
-            if(item in self.c.x_batch):
-                input_tensor.append(self.c.x_batch[item])
-            else:
-                input_tensor.append(item.forward(X=X))
-        #self.input_tensor = torch.stack(tensor)
-        #tensor = tensor[0]
-        #torch.cat(tensor, dim=1)
-        self.input_tensor = torch.cat(input_tensor, dim=1)
-
-        # if key from self.input in X -> Feature, sonst Neuron und aufrufen.
-        # output: input tensor"""
 
     def prep_input(self, X):  # vllt optimieren, ohne python Liste
         input_tensor = []
@@ -69,6 +56,7 @@ class Neuron(torch.nn.Module):
         """input_tensor = torch.stack(input_tensor)
         input_tensor = torch.transpose(input_tensor, dim0=0, dim1=1)"""
         input_tensor = torch.cat(input_tensor, dim=1)
+
         return input_tensor
         #return input_tensor
 
@@ -119,7 +107,7 @@ class Neuron(torch.nn.Module):
         len_input = torch.tensor(len(self.input_keys))
         threshold = torch.divide(torch.tensor(1), torch.sqrt(len_input))
         weights = torch.distributions.uniform.Uniform(low=-threshold, high=threshold).sample((len(self.input_keys),))
-        #bias = torch.distributions.uniform.Uniform(low=-torch.sqrt(torch.tensor(len(self.input_keys))), high=torch.sqrt(torch.tensor(len(self.input_keys)))).sample((1,))
+        #bias = torch.distributions.uniform.Uniform(low=-torch.sqrt(torch.tensor(len(self.input_keys))), high=torch.sqrt(torch.tensor(len(self.input_keys)))).sample((1,)
         bias = torch.tensor([0.0])
         return weights, bias
 
@@ -133,6 +121,8 @@ class Neuron(torch.nn.Module):
         #weights = torch.distributions.uniform.Uniform(low=-torch.sqrt(torch.tensor(len(self.input_keys))), high=torch.sqrt(torch.tensor(len(self.input_keys)))).sample((len(self.input_keys),))
         weights = torch.distributions.uniform.Uniform(low=-threshold, high=threshold).sample((len(self.input_keys),))
         #bias = torch.distributions.uniform.Uniform(low=-torch.sqrt(torch.tensor(len(self.input_keys))), high=torch.sqrt(torch.tensor(len(self.input_keys)))).sample((1,))
+        """if self.is_output:
+            weights = torch.abs(weights)"""
         bias = torch.tensor([0.0])
         return weights, bias
 
@@ -161,5 +151,9 @@ class Neuron(torch.nn.Module):
 
     def sigmoid(self):
         self.act = torch.nn.Sigmoid()
+
     def relu(self):
         self.act = torch.nn.ReLU()
+
+    def identity(self):
+        self.act = torch.nn.Identity()
