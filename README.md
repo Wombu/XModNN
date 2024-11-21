@@ -14,7 +14,7 @@ Required packages for usage of XModNN in python 3.10.9:
 - sklearn 1.3.0
 - seaborn 0.12.2
 
-To train, validate and run XModNN you would need ot generate four different files located in /data containing the information of the data (1.), the class-labels per sample id (2.), the structure file to create the ModNN (3.) and the hierarchy file for adjsuting the biological information for the network based on the KEGG or GO or any other functional hierarchy:
+To train, validate and run XModNN you would need ot generate four different files located in /data containing the information of the data (1.), the class-labels per sample id (2.), the structure file to create the ModNN (3.) and the hierarchy file for adjusting the biological information for the network based on the KEGG or GO or any other functional hierarchy:
 Required files in /data:  
 1. dataset.csv  
   columnames: sample ids  
@@ -37,9 +37,16 @@ F stands for feature, M stands for module, O stands for global network output:
   This file inherits all individual connections from the functional hierarchy and is used for renaming purposes for the evaluation of XModNN.  
   rowwise: hierarchylevel,modulename,pathwayname(\t)hierarchylevel,modulename,pathwayname(\t)...  
 
+5. XModNN_train.py
+  Adjust the hyperparameter for the used model within top the file.
+
+6. XModNN_eval.py
+  Select the directory of a trained model by adjusting the "path" variable
+
+
 For all required files we included a test dataset in data/logic which is based on a simple logical equation. This includes an artifical dataset, label, structure and hierarchy file to test XModNN. 
 
-The output of XModNN from the sex predictions fomr the publication are included together with the best models in output/sex. No original datasets or proband information can be found there.  
+The output of XModNN from the sex predictions from the publication are included together with the best models in output/sex. No original datasets or proband information can be found there.  
 
 The file XModNN_train.py inherits an example training query for XModNN.  
 The file XModNN_eval.py inherits the evaluation of the trained models.  
